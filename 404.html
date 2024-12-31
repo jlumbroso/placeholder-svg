@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic SVG Placeholder</title>
+  <!-- We keep minimal styling; it won't matter since we redirect anyway. -->
+  <style>
+    body { margin: 0; padding: 0; }
+  </style>
+</head>
+<body>
+<script>
+(function() {
+  // -- Helper function to Base64-encode a potentially Unicode string:
+  //    (ensures we can handle non-ASCII characters in label text).
+  function base64EncodeUnicode(str) {
+    // First we encode the string as UTF-8, then btoa that
+    // https://developer.mozilla.org/en-US/docs/Web/API/WindowOrWorkerGlobalScope/btoa#unicode_strings
+    return btoa(
+      encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+        return String.fromCharCode("0x" + p1);
+      })
+    );
+  }
+
+  // -- Utility to ensure a string is a valid hex color with optional '#' prefix
+  function normalizeColor(c) {
+    if (!c) return "#555555";
+    c = c.trim().replace(/^#/, "");
+    // If it looks like "ABCDEF" or "abc123" or "AAA", add the '#' back:
+    if (/^[0-9A-Fa-f]{3,6}$/.test(c)) {
+      return "#" + c;
+    }
+    return "#555555"; // fallback
+  }
+
+  // Grab path segments (e.g. /placeholder-pic/svg/300 => ["", "placeholder-pic","svg","300"])
+  var segments = window.location.pathname.split("/").filter(Boolean);
+
+  // Find where "svg" appears in the path
+  var svgIndex = segments.indexOf("svg");
+  if (svgIndex === -1) {
+    // If there's no /svg/ in the URL, just show a normal 404
+    document.body.innerHTML = "<h1>404 Not Found</h1>";
+    return;
+  }
+
+  // Everything after /svg/ is used for our dynamic placeholder logic
+  var params = segments.slice(svgIndex + 1);
+  // e.g. /svg/300x200/2AFF95-4E62FF/FF1188-D020FF/Hello%20World
+  // => params = ["300x200", "2AFF95-4E62FF", "FF1188-D020FF", "Hello%20World"]
+
+  // 1) Parse width & height
+  var sizePart = params[0] || "300";
+  var width = 300, height = 300;
+  if (sizePart.includes("x")) {
+    var wh = sizePart.split("x");
+    var w = parseInt(wh[0], 10);
+    var h = parseInt(wh[1], 10);
+    if (!isNaN(w) && w > 0) width = w;
+    if (!isNaN(h) && h > 0) height = h;
+  } else {
+    var s = parseInt(sizePart, 10);
+    if (!isNaN(s) && s > 0) {
+      width = s;
+      height = s;
+    }
+  }
+
+  // 2) Parse background color(s) => "DEDEDE" or "DEDEDE-AAAAAA"
+  var backgroundPart = params[1] || "";
+  var bgColors = backgroundPart.split("-").map(normalizeColor).filter(Boolean);
+  if (!bgColors.length) {
+    bgColors = ["#DEDEDE"];
+  }
+
+  // 3) Parse text color & stroke color => "FF1188" or "FF1188-D020FF"
+  var colorPart = params[2] || "";
+  var cParts = colorPart.split("-").map(normalizeColor).filter(Boolean);
+  var textColor   = cParts[0] || "#555555";
+  var strokeColor = cParts[1] || "#555555";
+
+  // 4) Parse label text
+  var label = params[3] ? decodeURIComponent(params[3]) : "";
+  if (!label) {
+    label = width + "×" + height;
+  }
+
+  // Build the SVG
+  var w2 = width - 4;  // inner width for the rectangle
+  var h2 = height - 4; // inner height
+
+  function buildGradient() {
+    // We'll do a horizontal gradient from x1="0" to x2="100%"
+    return [
+      '<linearGradient id="lg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100%" y2="0">',
+      '  <stop offset="0%" stop-color="' + bgColors[0] + '"/>',
+      '  <stop offset="100%" stop-color="' + bgColors[1] + '"/>',
+      '</linearGradient>'
+    ].join("\n");
+  }
+
+  var svgParts = [];
+  svgParts.push('<svg width="' + width + '" height="' + height + '" xmlns="http://www.w3.org/2000/svg">');
+
+  // If we have 2 background colors => gradient
+  if (bgColors.length === 2) {
+    svgParts.push(buildGradient());
+    svgParts.push(
+      '<rect x="2" y="2" width="' + w2 + '" height="' + h2 + '" ' +
+      'style="fill:url(#lg);stroke:' + strokeColor + ';stroke-width:2"/>'
+    );
+  } else {
+    // Single color fill
+    var fillColor = bgColors[0];
+    svgParts.push(
+      '<rect x="2" y="2" width="' + w2 + '" height="' + h2 + '" ' +
+      'style="fill:' + fillColor + ';stroke:' + strokeColor + ';stroke-width:2"/>'
+    );
+  }
+
+  // Text
+  svgParts.push(
+    '<text x="50%" y="50%" font-size="18" text-anchor="middle" alignment-baseline="middle" ' +
+    'font-family="monospace, sans-serif" fill="' + textColor + '">' +
+      // sanitize for HTML
+      label.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") +
+    '</text>'
+  );
+  svgParts.push('</svg>');
+
+  var svgString = svgParts.join("\n");
+  // Base64–encode it properly to handle possible Unicode
+  var base64SVG = base64EncodeUnicode(svgString);
+  var dataURI   = "data:image/svg+xml;base64," + base64SVG;
+
+  // Redirect to the data: URI so that the final resource is served as image/svg+xml.
+  window.location.replace(dataURI);
+})();
+</script>
+</body>
+</html>
